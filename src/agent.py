@@ -180,7 +180,7 @@ Constraints:
 """
 
 agent = Agent[Ctx](
-    model="openai:gpt-4.1-mini",  # or any configured model
+    model="gateway/openai:gpt-4.1-mini",
     system_prompt=system_prompt,
     tools=[
         list_good_for_ai_issues_tool,
