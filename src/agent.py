@@ -31,6 +31,12 @@ class Issue(BaseModel):
     labels: List[str] = []
 
 
+class NewIssue(BaseModel):
+    title: str
+    body: str
+    labels: List[str] = []
+
+
 class FileChange(BaseModel):
     path: str
     content: str
@@ -110,6 +116,26 @@ class GitHubClient:
         # or use the git data API for more control
         pass
 
+    def create_issue(self, new_issue: NewIssue) -> Issue:
+        url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/issues"
+        resp = self._client.post(
+            url,
+            json={
+                "title": new_issue.title,
+                "body": new_issue.body,
+                "labels": new_issue.labels,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        labels = [label["name"] for label in data.get("labels", [])]
+        return Issue(
+            number=data["number"],
+            title=data["title"],
+            body=data.get("body"),
+            labels=labels,
+        )
+
     def open_pull_request(self, plan: MergeRequestPlan) -> MergeResult:
         url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/pulls"
         default_branch = self.get_default_branch()
@@ -145,6 +171,17 @@ def list_good_for_ai_issues_tool(ctx: RunContext[Ctx]) -> List[Issue]:
     List all open GitHub issues that have the 'good-for-ai' label.
     """
     return ctx.deps.github.list_good_for_ai_issues()
+
+
+@Tool
+def create_issue_tool(
+    ctx: RunContext[Ctx],
+    new_issue: NewIssue,
+) -> Issue:
+    """
+    Create a new GitHub issue in the repository with a title, body, and optional labels.
+    """
+    return ctx.deps.github.create_issue(new_issue)
 
 
 @Tool
@@ -184,6 +221,7 @@ agent = Agent[Ctx](
     system_prompt=system_prompt,
     tools=[
         list_good_for_ai_issues_tool,
+        create_issue_tool,
         create_merge_request_tool,
     ],
 )

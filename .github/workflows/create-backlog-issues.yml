@@ -1,0 +1,97 @@
+name: Create Backlog Issues
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  create-issues:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create issue for create_branch_from_default
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Implement \`create_branch_from_default\` in GitHubClient" \
+            --body "## Summary
+
+The \`create_branch_from_default\` method in \`GitHubClient\` (\`src/agent.py\`) is currently unimplemented (contains only a \`pass\` statement). It needs to be implemented so the agent can create a new branch from the repository's default branch before committing changes.
+
+## Steps to Implement
+
+1. **GET the default branch and its latest commit SHA**
+   - Use the existing \`get_default_branch()\` helper to get the branch name
+   - Call \`GET /repos/{owner}/{repo}/git/ref/heads/{default_branch}\` to obtain the latest commit SHA
+
+2. **POST to create a new branch ref**
+   - Call \`POST /repos/{owner}/{repo}/git/refs\` with the payload:
+     \`\`\`json
+     { \"ref\": \"refs/heads/{branch_name}\", \"sha\": \"{latest_commit_sha}\" }
+     \`\`\`
+
+## Context
+
+This method is called by \`create_merge_request_tool\` before committing file changes and opening a pull request. Without this implementation, the agent cannot create branches and therefore cannot open pull requests.
+
+\`\`\`python
+# Current (unimplemented):
+def create_branch_from_default(self, branch_name: str) -> None:
+    # NOTE: this is simplified scaffolding; you'll likely want to:
+    # 1. GET default branch + its latest commit SHA
+    # 2. POST /git/refs to create a new branch ref
+    pass
+\`\`\`"
+
+      - name: Create issue for commit_changes_to_branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "Implement \`commit_changes_to_branch\` in GitHubClient" \
+            --body "## Summary
+
+The \`commit_changes_to_branch\` method in \`GitHubClient\` (\`src/agent.py\`) is currently unimplemented (contains only a \`pass\` statement). It needs to be implemented so the agent can commit file changes to a branch before opening a pull request.
+
+## Steps to Implement
+
+Choose **one** of the two approaches below:
+
+### Option A: Contents API (simpler, file-by-file)
+For each \`FileChange\` in \`plan.changes\`:
+1. Call \`GET /repos/{owner}/{repo}/contents/{path}?ref={branch}\` to fetch the current file SHA (if the file exists)
+2. Call \`PUT /repos/{owner}/{repo}/contents/{path}\` with the payload:
+   \`\`\`json
+   {
+     \"message\": \"{change.message}\",
+     \"content\": \"<base64-encoded content>\",
+     \"branch\": \"{plan.branch_name}\",
+     \"sha\": \"<existing file SHA, if updating>\"
+   }
+   \`\`\`
+
+### Option B: Git Data API (more control, single commit)
+1. Get the latest commit SHA for the branch
+2. Get the base tree SHA from the commit
+3. Create new blob(s) via \`POST /repos/{owner}/{repo}/git/blobs\`
+4. Create a new tree via \`POST /repos/{owner}/{repo}/git/trees\`
+5. Create a new commit via \`POST /repos/{owner}/{repo}/git/commits\`
+6. Update the branch ref via \`PATCH /repos/{owner}/{repo}/git/refs/heads/{branch}\`
+
+## Context
+
+This method is called by \`create_merge_request_tool\` after \`create_branch_from_default\` and before \`open_pull_request\`. Without this implementation, the agent cannot write code changes to a branch.
+
+\`\`\`python
+# Current (unimplemented):
+def commit_changes_to_branch(self, plan: MergeRequestPlan) -> None:
+    # NOTE: scaffolding: implement:
+    # - GET file blobs / trees
+    # - PUT file contents via /contents
+    # or use the git data API for more control
+    pass
+\`\`\`"
