@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from typing import List
@@ -43,6 +44,12 @@ class MergeRequestPlan(BaseModel):
     title: str
     body: str
     changes: List[FileChange]
+
+
+class CreateIssueRequest(BaseModel):
+    title: str
+    body: str | None = None
+    labels: List[str] = []
 
 
 class MergeResult(BaseModel):
@@ -98,17 +105,56 @@ class GitHubClient:
         return issues
 
     def create_branch_from_default(self, branch_name: str) -> None:
-        # NOTE: this is simplified scaffolding; you'll likely want to:
-        # 1. GET default branch + its latest commit SHA
-        # 2. POST /git/refs to create a new branch ref
-        pass
+        default_branch = self.get_default_branch()
+        ref_url = (
+            f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}"
+            f"/git/ref/heads/{default_branch}"
+        )
+        resp = self._client.get(ref_url)
+        resp.raise_for_status()
+        sha = resp.json()["object"]["sha"]
+
+        refs_url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/git/refs"
+        resp = self._client.post(
+            refs_url,
+            json={"ref": f"refs/heads/{branch_name}", "sha": sha},
+        )
+        resp.raise_for_status()
 
     def commit_changes_to_branch(self, plan: MergeRequestPlan) -> None:
-        # NOTE: scaffolding: implement:
-        # - GET file blobs / trees
-        # - PUT file contents via /contents
-        # or use the git data API for more control
-        pass
+        for change in plan.changes:
+            url = (
+                f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}"
+                f"/contents/{change.path}"
+            )
+            get_resp = self._client.get(url, params={"ref": plan.branch_name})
+            payload: dict = {
+                "message": change.message,
+                "content": base64.b64encode(change.content.encode()).decode(),
+                "branch": plan.branch_name,
+            }
+            if get_resp.status_code == 200:
+                payload["sha"] = get_resp.json()["sha"]
+            resp = self._client.put(url, json=payload)
+            resp.raise_for_status()
+
+    def create_issue(self, request: CreateIssueRequest) -> Issue:
+        url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/issues"
+        payload: dict = {"title": request.title}
+        if request.body:
+            payload["body"] = request.body
+        if request.labels:
+            payload["labels"] = request.labels
+        resp = self._client.post(url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        labels = [label["name"] for label in data.get("labels", [])]
+        return Issue(
+            number=data["number"],
+            title=data["title"],
+            body=data.get("body"),
+            labels=labels,
+        )
 
     def open_pull_request(self, plan: MergeRequestPlan) -> MergeResult:
         url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/pulls"
@@ -148,6 +194,17 @@ def list_good_for_ai_issues_tool(ctx: RunContext[Ctx]) -> List[Issue]:
 
 
 @Tool
+def create_issue_tool(
+    ctx: RunContext[Ctx],
+    request: CreateIssueRequest,
+) -> Issue:
+    """
+    Create a new GitHub issue in the repository.
+    """
+    return ctx.deps.github.create_issue(request)
+
+
+@Tool
 def create_merge_request_tool(
     ctx: RunContext[Ctx],
     plan: MergeRequestPlan,
@@ -168,7 +225,8 @@ You are an AI code agent responsible for:
 
 1. Scanning a GitHub repository for open issues labeled 'good-for-ai'.
 2. For each suitable issue, planning a minimal, safe code change that addresses the issue.
-3. Preparing a merge request (pull request) with:
+3. Creating new GitHub issues when you identify improvements or bugs that are not yet tracked.
+4. Preparing a merge request (pull request) with:
    - a descriptive title
    - a clear body explaining what you changed and why
    - small, focused commits
@@ -184,6 +242,7 @@ agent = Agent[Ctx](
     system_prompt=system_prompt,
     tools=[
         list_good_for_ai_issues_tool,
+        create_issue_tool,
         create_merge_request_tool,
     ],
 )
