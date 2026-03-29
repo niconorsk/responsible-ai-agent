@@ -98,10 +98,18 @@ class GitHubClient:
         return issues
 
     def create_branch_from_default(self, branch_name: str) -> None:
-        # NOTE: this is simplified scaffolding; you'll likely want to:
-        # 1. GET default branch + its latest commit SHA
-        # 2. POST /git/refs to create a new branch ref
-        pass
+        default_branch = self.get_default_branch()
+        ref_url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/git/refs/heads/{default_branch}"
+        ref_resp = self._client.get(ref_url)
+        ref_resp.raise_for_status()
+        sha = ref_resp.json()["object"]["sha"]
+
+        refs_url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/git/refs"
+        create_resp = self._client.post(
+            refs_url,
+            json={"ref": f"refs/heads/{branch_name}", "sha": sha},
+        )
+        create_resp.raise_for_status()
 
     def commit_changes_to_branch(self, plan: MergeRequestPlan) -> None:
         # NOTE: scaffolding: implement:
