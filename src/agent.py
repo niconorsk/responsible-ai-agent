@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from typing import List
@@ -104,11 +105,28 @@ class GitHubClient:
         pass
 
     def commit_changes_to_branch(self, plan: MergeRequestPlan) -> None:
-        # NOTE: scaffolding: implement:
-        # - GET file blobs / trees
-        # - PUT file contents via /contents
-        # or use the git data API for more control
-        pass
+        for change in plan.changes:
+            url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/contents/{change.path}"
+
+            # Fetch the current file SHA if it exists (required by the API for updates).
+            sha: str | None = None
+            get_resp = self._client.get(url, params={"ref": plan.branch_name})
+            if get_resp.status_code == 200:
+                sha = get_resp.json().get("sha")
+            elif get_resp.status_code != 404:
+                get_resp.raise_for_status()
+
+            encoded_content = base64.b64encode(change.content.encode()).decode()
+            payload: dict = {
+                "message": change.message,
+                "content": encoded_content,
+                "branch": plan.branch_name,
+            }
+            if sha is not None:
+                payload["sha"] = sha
+
+            put_resp = self._client.put(url, json=payload)
+            put_resp.raise_for_status()
 
     def open_pull_request(self, plan: MergeRequestPlan) -> MergeResult:
         url = f"{self.base_url}/repos/{self.cfg.owner}/{self.cfg.repo}/pulls"
